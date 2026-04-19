@@ -184,10 +184,10 @@ header { display: flex; align-items: flex-end; justify-content: space-between; m
   let apiKey = localStorage.getItem('sf_key') || 'sk-kcdjxgxujkgkfuxyqfyebqdwvjczsmtihydslzpfurttaogt';
 
   const PROMPTS = {
-    describe: "你是一个帮助盲人和视障用户的助手。用生动、清晰的中文描述这张图片，就像你是用户的眼睛一样。描述场景的整体感觉、主要物体、人物、颜色和空间关系。语言温暖自然，100字以内。",
-    objects: "你在帮助盲人用户识别物体。用中文列出你看到的主要物体，说明它们的大致位置（左边、右边、中间、前景、背景）。清晰简洁，80字以内。",
-    text: "你在帮助盲人用户阅读文字。用中文提取并朗读图片中所有可见的文字——标牌、标签、屏幕、文件等。如果没有文字，请说明。保持准确。",
-    danger: "你是盲人用户的安全助手。用中文识别任何危险或障碍物——台阶、湿地板、车辆、尖锐物体、火等。如果安全，请明确说明。直接简短，60字以内。",
+    describe: "用中文直接描述图片内容。先说整体场景，再说关键细节：有什么人、物体、文字、环境。不要开场白，不要'图片中'这类废话，直接说内容。60字以内。",
+    objects: "用中文列出图片中的主要物体，每个物体说明位置（左、右、中、前、后）和大概距离（近、中、远）。直接列举，不要废话。",
+    text: "读出图片中所有文字，保持原始顺序。直接念出来，不要说'图片中有文字'之类的开头。没有文字就说'没有文字'。",
+    danger: "判断图片中是否有危险。有危险：直接说危险在哪、是什么。没危险：说'环境安全'。不超过30字。",
   };
 
   function updateKeyBadge() {
@@ -224,6 +224,11 @@ header { display: flex; align-items: flex-end; justify-content: space-between; m
   async function analyze() {
     if (!currentImageDataUrl) return;
     if (!apiKey || apiKey.length < 10) { showToast('请先设置 API 密钥', true); openModal(); return; }
+
+    // 在用户点击时预先解锁浏览器语音权限
+    const unlock = new SpeechSynthesisUtterance('');
+    window.speechSynthesis.speak(unlock);
+    window.speechSynthesis.cancel();
 
     const btn = document.getElementById('analyze-btn');
     btn.disabled = true;
