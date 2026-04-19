@@ -179,6 +179,8 @@ font-family: -apple-system, ‘PingFang SC’, sans-serif;
 .result-label { font-size: 10px; letter-spacing: 2.5px; color: var(–accent); font-weight: 700; margin-bottom: 14px; text-transform: uppercase; }
 .result-text { font-size: 17px; line-height: 1.8; color: var(–text); }
 .replay-btn { display: flex; align-items: center; gap: 8px; margin-top: 18px; color: var(–accent); font-size: 14px; font-weight: 600; cursor: pointer; background: none; border: none; padding: 0; font-family: -apple-system, ‘PingFang SC’, sans-serif; }
+.btn-speak { width: 100%; margin-top: 16px; padding: 18px; border-radius: 16px; background: rgba(0,240,200,0.12); border: 1.5px solid rgba(0,240,200,0.4); color: var(–accent); font-size: 17px; font-weight: 700; cursor: pointer; font-family: -apple-system, ‘PingFang SC’, sans-serif; transition: all 0.2s; }
+.btn-speak:active { background: rgba(0,240,200,0.2); transform: scale(0.98); }
 
 /* ── History ── */
 .history-section { margin-bottom: 16px; display: none; }
@@ -289,7 +291,7 @@ canvas#snapshot { display: none; }
 
   <!-- Capture Zone -->
 
-  <div class="capture-zone" id="capture-zone" onclick="openCam()">
+  <div class="capture-zone" id="capture-zone" onclick="openCamera()">
     <div class="placeholder" id="placeholder">
       <div class="cam-circle">📷</div>
       <div class="placeholder-title">点击拍照</div>
@@ -299,13 +301,14 @@ canvas#snapshot { display: none; }
   </div>
 
   <input type="file" id="file-input" accept="image/*" onchange="handleFile(this)">
-  <canvas id="snapshot"></canvas>
-  <!-- Camera modal -->
-  <div id="cam-modal" style="display:none;position:fixed;inset:0;background:#000;z-index:200;flex-direction:column;align-items:center;justify-content:center;">
-    <video id="cam-video" autoplay playsinline style="width:100%;max-height:75vh;object-fit:cover;"></video>
-    <div style="display:flex;gap:20px;padding:24px;">
-      <button onclick="closeCam()" style="flex:1;padding:18px;border-radius:16px;background:#333;color:#fff;border:none;font-size:16px;cursor:pointer;">取消</button>
-      <button onclick="snapPhoto()" style="flex:2;padding:18px;border-radius:16px;background:#00f0c8;color:#000;border:none;font-size:18px;font-weight:700;cursor:pointer;">📸 拍照</button>
+  <input type="file" id="camera-input" accept="image/*" capture="environment" onchange="handleFile(this)">
+  <canvas id="snapshot" style="display:none"></canvas>
+  <!-- PC camera modal -->
+  <div id="pc-cam-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.95);z-index:300;flex-direction:column;align-items:center;justify-content:center;gap:20px;">
+    <video id="pc-cam-video" autoplay playsinline style="width:100%;max-width:500px;border-radius:16px;object-fit:cover;"></video>
+    <div style="display:flex;gap:16px;width:100%;max-width:500px;padding:0 20px;">
+      <button onclick="closePcCam()" style="flex:1;padding:18px;border-radius:16px;background:#333;color:#fff;border:none;font-size:16px;cursor:pointer;">取消</button>
+      <button onclick="snapPcPhoto()" style="flex:2;padding:18px;border-radius:16px;background:#00f0c8;color:#000;border:none;font-size:18px;font-weight:700;cursor:pointer;">📸 拍照</button>
     </div>
   </div>
 
@@ -313,7 +316,7 @@ canvas#snapshot { display: none; }
 
   <div class="btn-row">
     <button class="btn-secondary" onclick="document.getElementById('file-input').click()">🖼 相册</button>
-    <button class="btn-secondary" onclick="openCam()">📷 拍照</button>
+    <button class="btn-secondary" onclick="openCamera()">📷 拍照</button>
   </div>
 
   <button class="btn-analyze" id="analyze-btn" onclick="analyze()" disabled>
@@ -336,7 +339,7 @@ canvas#snapshot { display: none; }
   <div class="result-card" id="result-card">
     <div class="result-label">AI 描述结果</div>
     <div class="result-text" id="result-text"></div>
-    <button class="replay-btn" onclick="speakText(currentResult)">🔊 重新朗读</button>
+    <button class="btn-speak" id="btn-speak" onclick="speakText(currentResult)">🔊 点击朗读</button>
   </div>
 
   <!-- History -->
@@ -591,35 +594,41 @@ canvas#snapshot { display: none; }
     }
   }
 
-  // ── Camera Modal ──
-  let camStream = null;
+  // ── Smart Camera: mobile uses system camera, PC uses getUserMedia ──
+  let pcCamStream = null;
 
-  async function openCam() {
-    const modal = document.getElementById('cam-modal');
-    modal.style.display = 'flex';
-    try {
-      camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
-      document.getElementById('cam-video').srcObject = camStream;
-    } catch(e) {
-      // fallback to front camera
-      try {
-        camStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-        document.getElementById('cam-video').srcObject = camStream;
-      } catch(e2) {
-        showToast('无法访问摄像头，请使用相册上传', true);
-        closeCam();
-      }
+  function isMobile() {
+    return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  }
+
+  function openCamera() {
+    if (isMobile()) {
+      document.getElementById('camera-input').click();
+    } else {
+      openPcCam();
     }
   }
 
-  function closeCam() {
-    if (camStream) { camStream.getTracks().forEach(t => t.stop()); camStream = null; }
-    document.getElementById('cam-modal').style.display = 'none';
-    document.getElementById('cam-video').srcObject = null;
+  async function openPcCam() {
+    const modal = document.getElementById('pc-cam-modal');
+    modal.style.display = 'flex';
+    try {
+      pcCamStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      document.getElementById('pc-cam-video').srcObject = pcCamStream;
+    } catch(e) {
+      showToast('无法访问摄像头：' + e.message, true);
+      closePcCam();
+    }
   }
 
-  function snapPhoto() {
-    const video = document.getElementById('cam-video');
+  function closePcCam() {
+    if (pcCamStream) { pcCamStream.getTracks().forEach(t => t.stop()); pcCamStream = null; }
+    document.getElementById('pc-cam-modal').style.display = 'none';
+    document.getElementById('pc-cam-video').srcObject = null;
+  }
+
+  function snapPcPhoto() {
+    const video = document.getElementById('pc-cam-video');
     const canvas = document.getElementById('snapshot');
     const maxW = 800;
     const scale = video.videoWidth > maxW ? maxW / video.videoWidth : 1;
@@ -634,7 +643,7 @@ canvas#snapshot { display: none; }
     document.getElementById('capture-zone').classList.add('has-image');
     document.getElementById('analyze-btn').disabled = false;
     document.getElementById('result-card').classList.remove('visible');
-    closeCam();
+    closePcCam();
   }
 
   function speakText(text) {
