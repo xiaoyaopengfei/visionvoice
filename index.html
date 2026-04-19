@@ -453,6 +453,15 @@ canvas#snapshot { display: none; }
     if (!currentImageDataUrl) return;
     if (!apiKey || apiKey.length < 10) { showToast('请先设置 API 密钥', true); openModal(); return; }
 
+    // iOS要求：必须在点击事件同步阶段触发语音，才能解锁权限
+    // 先播一个空白语音占位，分析完替换内容
+    window.speechSynthesis.cancel();
+    const placeholder = new SpeechSynthesisUtterance('正在分析');
+    placeholder.lang = 'zh-CN';
+    placeholder.volume = 0.01; // 几乎无声
+    placeholder.rate = 0.1;
+    window.speechSynthesis.speak(placeholder);
+
     const btn = document.getElementById('analyze-btn');
     btn.disabled = true;
     btn.classList.add('loading');
@@ -469,6 +478,8 @@ canvas#snapshot { display: none; }
       historyList.unshift({ time, mode: modeNames[currentMode], text });
       if (historyList.length > 5) historyList.pop();
       renderHistory();
+      // 取消占位语音，播放真实内容
+      window.speechSynthesis.cancel();
       speakText(text);
     } catch (e) {
       showToast('错误：' + e.message, true);
