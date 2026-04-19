@@ -289,7 +289,7 @@ canvas#snapshot { display: none; }
 
   <!-- Capture Zone -->
 
-  <div class="capture-zone" id="capture-zone" onclick="document.getElementById('camera-input').click()">
+  <div class="capture-zone" id="capture-zone" onclick="openCam()">
     <div class="placeholder" id="placeholder">
       <div class="cam-circle">📷</div>
       <div class="placeholder-title">点击拍照</div>
@@ -298,15 +298,22 @@ canvas#snapshot { display: none; }
     <img id="preview-img" style="display:none" alt="已选择的图片" />
   </div>
 
-  <input type="file" id="camera-input" accept="image/*" capture="environment" onchange="handleFile(this)">
   <input type="file" id="file-input" accept="image/*" onchange="handleFile(this)">
   <canvas id="snapshot"></canvas>
+  <!-- Camera modal -->
+  <div id="cam-modal" style="display:none;position:fixed;inset:0;background:#000;z-index:200;flex-direction:column;align-items:center;justify-content:center;">
+    <video id="cam-video" autoplay playsinline style="width:100%;max-height:75vh;object-fit:cover;"></video>
+    <div style="display:flex;gap:20px;padding:24px;">
+      <button onclick="closeCam()" style="flex:1;padding:18px;border-radius:16px;background:#333;color:#fff;border:none;font-size:16px;cursor:pointer;">取消</button>
+      <button onclick="snapPhoto()" style="flex:2;padding:18px;border-radius:16px;background:#00f0c8;color:#000;border:none;font-size:18px;font-weight:700;cursor:pointer;">📸 拍照</button>
+    </div>
+  </div>
 
   <!-- Buttons -->
 
   <div class="btn-row">
     <button class="btn-secondary" onclick="document.getElementById('file-input').click()">🖼 相册</button>
-    <button class="btn-secondary" onclick="document.getElementById('camera-input').click()">📷 拍照</button>
+    <button class="btn-secondary" onclick="openCam()">📷 拍照</button>
   </div>
 
   <button class="btn-analyze" id="analyze-btn" onclick="analyze()" disabled>
@@ -386,6 +393,17 @@ canvas#snapshot { display: none; }
 
   const LIVE_PROMPT = "以拍摄者视角为准，左图=左边，右图=右边。判断前方是否安全：有无台阶、障碍物、车辆、人群，说明位置。安全说：前方安全。有障碍直接说位置和类型。30字以内，简短直接。";
 
+  // Unlock speech synthesis on first user interaction
+  function unlockSpeech() {
+    const u = new SpeechSynthesisUtterance('');
+    window.speechSynthesis.speak(u);
+    window.speechSynthesis.cancel();
+    document.removeEventListener('touchstart', unlockSpeech);
+    document.removeEventListener('click', unlockSpeech);
+  }
+  document.addEventListener('touchstart', unlockSpeech, { once: true });
+  document.addEventListener('click', unlockSpeech, { once: true });
+
   function updateKeyBadge() {
     const btn = document.getElementById('key-btn');
     if (apiKey && apiKey.length > 10) { btn.textContent = '✓ 密钥已设置'; btn.classList.add('set'); }
@@ -404,14 +422,25 @@ canvas#snapshot { display: none; }
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (e) => {
-      currentImageDataUrl = e.target.result;
-      const img = document.getElementById('preview-img');
-      img.src = currentImageDataUrl;
-      img.style.display = 'block';
-      document.getElementById('placeholder').style.display = 'none';
-      document.getElementById('capture-zone').classList.add('has-image');
-      document.getElementById('analyze-btn').disabled = false;
-      document.getElementById('result-card').classList.remove('visible');
+      // Compress image to max 800px wide, 0.7 quality
+      const imgEl = new Image();
+      imgEl.onload = () => {
+        const canvas = document.createElement('canvas');
+        const maxW = 800;
+        const scale = imgEl.width > maxW ? maxW / imgEl.width : 1;
+        canvas.width = imgEl.width * scale;
+        canvas.height = imgEl.height * scale;
+        canvas.getContext('2d').drawImage(imgEl, 0, 0, canvas.width, canvas.height);
+        currentImageDataUrl = canvas.toDataURL('image/jpeg', 0.7);
+        const preview = document.getElementById('preview-img');
+        preview.src = currentImageDataUrl;
+        preview.style.display = 'block';
+        document.getElementById('placeholder').style.display = 'none';
+        document.getElementById('capture-zone').classList.add('has-image');
+        document.getElementById('analyze-btn').disabled = false;
+        document.getElementById('result-card').classList.remove('visible');
+      };
+      imgEl.src = e.target.result;
     };
     reader.readAsDataURL(file);
     input.value = '';
@@ -420,11 +449,6 @@ canvas#snapshot { display: none; }
   async function analyze() {
     if (!currentImageDataUrl) return;
     if (!apiKey || apiKey.length < 10) { showToast('请先设置 API 密钥', true); openModal(); return; }
-
-    // Unlock speech on user gesture
-    const unlock = new SpeechSynthesisUtterance('');
-    window.speechSynthesis.speak(unlock);
-    window.speechSynthesis.cancel();
 
     const btn = document.getElementById('analyze-btn');
     btn.disabled = true;
@@ -565,6 +589,52 @@ canvas#snapshot { display: none; }
     } catch (e) {
       showToast('分析失败：' + e.message, true);
     }
+  }
+
+  // ── Camera Modal ──
+  let camStream = null;
+
+  async function openCam() {
+    const modal = document.getElementById('cam-modal');
+    modal.style.display = 'flex';
+    try {
+      camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+      document.getElementById('cam-video').srcObject = camStream;
+    } catch(e) {
+      // fallback to front camera
+      try {
+        camStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        document.getElementById('cam-video').srcObject = camStream;
+      } catch(e2) {
+        showToast('无法访问摄像头，请使用相册上传', true);
+        closeCam();
+      }
+    }
+  }
+
+  function closeCam() {
+    if (camStream) { camStream.getTracks().forEach(t => t.stop()); camStream = null; }
+    document.getElementById('cam-modal').style.display = 'none';
+    document.getElementById('cam-video').srcObject = null;
+  }
+
+  function snapPhoto() {
+    const video = document.getElementById('cam-video');
+    const canvas = document.getElementById('snapshot');
+    const maxW = 800;
+    const scale = video.videoWidth > maxW ? maxW / video.videoWidth : 1;
+    canvas.width = video.videoWidth * scale;
+    canvas.height = video.videoHeight * scale;
+    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+    currentImageDataUrl = canvas.toDataURL('image/jpeg', 0.7);
+    const img = document.getElementById('preview-img');
+    img.src = currentImageDataUrl;
+    img.style.display = 'block';
+    document.getElementById('placeholder').style.display = 'none';
+    document.getElementById('capture-zone').classList.add('has-image');
+    document.getElementById('analyze-btn').disabled = false;
+    document.getElementById('result-card').classList.remove('visible');
+    closeCam();
   }
 
   function speakText(text) {
